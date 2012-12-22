@@ -1,23 +1,30 @@
 """Feed to Zinnia command module"""
+import os
 import sys
+from urllib2 import urlopen
 from datetime import datetime
 from optparse import make_option
 
+from django.conf import settings
+from django.utils import timezone
+from django.core.files import File
+from django.utils.text import Truncator
 from django.utils.html import strip_tags
 from django.db.utils import IntegrityError
 from django.utils.encoding import smart_str
-from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
-from django.utils.text import truncate_words
 from django.template.defaultfilters import slugify
 from django.core.management.base import CommandError
 from django.core.management.base import LabelCommand
+from django.core.files.temp import NamedTemporaryFile
 
 from zinnia import __version__
-from zinnia.models import Entry
-from zinnia.models import Category
+from zinnia.models.entry import Entry
+from zinnia.models.author import Author
+from zinnia.models.category import Category
 from zinnia.managers import PUBLISHED
-from zinnia.signals import disconnect_zinnia_signals
+from zinnia.signals import disconnect_entry_signals
+from zinnia.signals import disconnect_discussion_signals
 
 
 class Command(LabelCommand):
@@ -28,14 +35,17 @@ class Command(LabelCommand):
     args = 'url'
 
     option_list = LabelCommand.option_list + (
-        make_option('--noautoexcerpt', action='store_false',
-                    dest='auto_excerpt', default=True,
+        make_option('--no-auto-excerpt', action='store_false',
+                    dest='auto-excerpt', default=True,
                     help='Do NOT generate an excerpt if not present.'),
+        make_option('--no-enclosure', action='store_false',
+                    dest='image-enclosure', default=True,
+                    help='Do NOT save image enclosure if present.'),
+        make_option('--no-tags', action='store_false',
+                    dest='tags', default=True,
+                    help='Do NOT store categories as tags'),
         make_option('--author', dest='author', default='',
                     help='All imported entries belong to specified author'),
-        make_option('--category-is-tag', action='store_true',
-                    dest='category-tag', default=False,
-                    help='Store categories as tags'),
         )
     SITE = Site.objects.get_current()
 
@@ -45,7 +55,8 @@ class Command(LabelCommand):
         self.style.TITLE = self.style.SQL_FIELD
         self.style.STEP = self.style.SQL_COLTYPE
         self.style.ITEM = self.style.HTTP_INFO
-        disconnect_zinnia_signals()
+        disconnect_entry_signals()
+        disconnect_discussion_signals()
 
     def write_out(self, message, verbosity_level=1):
         """Convenient method for outputing"""
@@ -60,15 +71,16 @@ class Command(LabelCommand):
             raise CommandError('You need to install the feedparser ' \
                                'module to run this command.')
 
-        self.verbosity = int(options.get('verbosity', 1))
-        self.auto_excerpt = options.get('auto_excerpt', True)
+        self.tags = options.get('tags', True)
         self.default_author = options.get('author')
-        self.category_tag = options.get('category-tag', False)
+        self.verbosity = int(options.get('verbosity', 1))
+        self.auto_excerpt = options.get('auto-excerpt', True)
+        self.image_enclosure = options.get('image-enclosure', True)
         if self.default_author:
             try:
-                self.default_author = User.objects.get(
+                self.default_author = Author.objects.get(
                     username=self.default_author)
-            except User.DoesNotExist:
+            except Author.DoesNotExist:
                 raise CommandError('Invalid username for default author')
 
         self.write_out(self.style.TITLE(
@@ -81,7 +93,13 @@ class Command(LabelCommand):
         """Import entries"""
         for feed_entry in feed_entries:
             self.write_out('> %s... ' % feed_entry.title)
-            creation_date = datetime(*feed_entry.date_parsed[:6])
+            if feed_entry.get('publised_parsed'):
+                creation_date = datetime(*feed_entry.published_parsed[:6])
+                if settings.USE_TZ:
+                    creation_date = timezone.make_aware(
+                        creation_date, timezone.utc)
+            else:
+                creation_date = timezone.now()
             slug = slugify(feed_entry.title)[:255]
 
             if Entry.objects.filter(creation_date__year=creation_date.year,
@@ -99,13 +117,14 @@ class Command(LabelCommand):
                           'status': PUBLISHED,
                           'creation_date': creation_date,
                           'start_publication': creation_date,
-                          'last_update': datetime.now(),
+                          'last_update': timezone.now(),
                           'slug': slug}
 
             if not entry_dict['excerpt'] and self.auto_excerpt:
-                entry_dict['excerpt'] = truncate_words(
-                    strip_tags(feed_entry.description), 50)
-            if self.category_tag:
+                entry_dict['excerpt'] = Truncator(
+                    strip_tags(feed_entry.description)).words(50)
+
+            if self.tags:
                 entry_dict['tags'] = self.import_tags(categories)
 
             entry = Entry(**entry_dict)
@@ -113,17 +132,28 @@ class Command(LabelCommand):
             entry.categories.add(*categories)
             entry.sites.add(self.SITE)
 
+            if self.image_enclosure:
+                for enclosure in feed_entry.enclosures:
+                    if 'image' in enclosure.get('type') \
+                           and enclosure.get('href'):
+                        img_tmp = NamedTemporaryFile(delete=True)
+                        img_tmp.write(urlopen(enclosure['href']).read())
+                        img_tmp.flush()
+                        entry.image.save(os.path.basename(enclosure['href']),
+                                         File(img_tmp))
+                        break
+
             if self.default_author:
                 entry.authors.add(self.default_author)
             elif feed_entry.get('author_detail'):
                 try:
-                    user = User.objects.create_user(
+                    author = Author.objects.create_user(
                         slugify(feed_entry.author_detail.get('name')),
                         feed_entry.author_detail.get('email', ''))
                 except IntegrityError:
-                    user = User.objects.get(
+                    author = Author.objects.get(
                         username=slugify(feed_entry.author_detail.get('name')))
-                entry.authors.add(user)
+                entry.authors.add(author)
 
             self.write_out(self.style.ITEM('OK\n'))
 

@@ -9,8 +9,8 @@ from tagging.models import Tag
 
 from zinnia import __version__
 from zinnia.settings import PROTOCOL
-from zinnia.models import Entry
-from zinnia.models import Category
+from zinnia.models.entry import Entry
+from zinnia.models.category import Category
 
 
 class Command(NoArgsCommand):
@@ -24,7 +24,6 @@ class Command(NoArgsCommand):
                         'categories': Category.objects.all(),
                         'tags': Tag.objects.usage_for_model(Entry),
                         'version': __version__,
-                        'description': 'Blog exported for django-blog-zinnia',
                         'language': settings.LANGUAGE_CODE,
                         'site': site,
                         'site_url': '%s://%s' % (PROTOCOL, site.domain)}

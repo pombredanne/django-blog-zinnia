@@ -6,8 +6,8 @@ from django.contrib.sites.models import Site
 from django.utils.translation import ugettext_lazy as _
 from django.contrib.admin.widgets import RelatedFieldWidgetWrapper
 
-from zinnia.models import Entry
-from zinnia.models import Category
+from zinnia.models.entry import Entry
+from zinnia.models.category import Category
 from zinnia.admin.widgets import TreeNodeChoiceField
 from zinnia.admin.widgets import MPTTFilteredSelectMultiple
 from zinnia.admin.widgets import MPTTModelMultipleChoiceField
@@ -18,7 +18,7 @@ class CategoryAdminForm(forms.ModelForm):
     parent = TreeNodeChoiceField(
         label=_('parent category').capitalize(),
         required=False, empty_label=_('No parent category'),
-        queryset=Category.tree.all())
+        queryset=Category.objects.all())
 
     def __init__(self, *args, **kwargs):
         super(CategoryAdminForm, self).__init__(*args, **kwargs)

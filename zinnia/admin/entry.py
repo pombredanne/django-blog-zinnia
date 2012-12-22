@@ -1,24 +1,28 @@
 """EntryAdmin for Zinnia"""
-from datetime import datetime
-
 from django.forms import Media
 from django.contrib import admin
-from django.contrib.auth.models import User
+from django.conf.urls import url
+from django.conf.urls import patterns
+from django.utils import timezone
+from django.utils.text import Truncator
 from django.utils.html import strip_tags
-from django.utils.text import truncate_words
-from django.conf.urls.defaults import url
-from django.conf.urls.defaults import patterns
+from django.core.urlresolvers import reverse
+from django.core.urlresolvers import NoReverseMatch
 from django.conf import settings as project_settings
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.translation import get_language
+from django.template.response import TemplateResponse
+from django.utils.translation import ungettext_lazy
 from django.utils.translation import ugettext_lazy as _
-from django.core.urlresolvers import reverse, NoReverseMatch
-
-from tagging.models import Tag
 
 from zinnia import settings
 from zinnia.managers import HIDDEN
 from zinnia.managers import PUBLISHED
+from zinnia.models.author import Author
 from zinnia.ping import DirectoryPinger
 from zinnia.admin.forms import EntryAdminForm
+from zinnia.admin.filters import AuthorListFilter
+from zinnia.admin.filters import CategoryListFilter
 
 
 class EntryAdmin(admin.ModelAdmin):
@@ -39,7 +43,7 @@ class EntryAdmin(admin.ModelAdmin):
                                                'pingback_enabled')}),
                  (_('Publication'), {'fields': ('categories', 'tags',
                                                 'sites', 'slug')}))
-    list_filter = ('categories', 'authors', 'status', 'featured',
+    list_filter = (CategoryListFilter, AuthorListFilter, 'status', 'featured',
                    'login_required', 'comment_enabled', 'pingback_enabled',
                    'creation_date', 'start_publication',
                    'end_publication', 'sites')
@@ -67,10 +71,12 @@ class EntryAdmin(admin.ModelAdmin):
         """Return the title with word count and number of comments"""
         title = _('%(title)s (%(word_count)i words)') % \
                 {'title': entry.title, 'word_count': entry.word_count}
-        comments = entry.comments.count()
-        if comments:
-            return _('%(title)s (%(comments)i comments)') % \
-                   {'title': title, 'comments': comments}
+        if entry.comment_count:
+            return ungettext_lazy('%(title)s (%(comments)i comment)',
+                                  '%(title)s (%(comments)i comments)',
+                                  entry.comment_count) % \
+                                  {'title': title,
+                                   'comments': entry.comment_count}
         return title
     get_title.short_description = _('title')
 
@@ -104,9 +110,8 @@ class EntryAdmin(admin.ModelAdmin):
         """Return the tags linked in HTML"""
         try:
             return ', '.join(['<a href="%s" target="blank">%s</a>' %
-                              (reverse('zinnia_tag_detail',
-                                       args=[tag.name]), tag.name)
-                              for tag in Tag.objects.get_for_object(entry)])
+                              (reverse('zinnia_tag_detail', args=[tag]), tag)
+                              for tag in entry.tags_list])
         except NoReverseMatch:
             return entry.tags
     get_tags.allow_tags = True
@@ -159,34 +164,44 @@ class EntryAdmin(admin.ModelAdmin):
     def save_model(self, request, entry, form, change):
         """Save the authors, update time, make an excerpt"""
         if not form.cleaned_data.get('excerpt') and entry.status == PUBLISHED:
-            entry.excerpt = truncate_words(strip_tags(entry.content), 50)
+            entry.excerpt = Truncator(strip_tags(entry.content)).words(50)
 
         if entry.pk and not request.user.has_perm('zinnia.can_change_author'):
             form.cleaned_data['authors'] = entry.authors.all()
 
         if not form.cleaned_data.get('authors'):
-            form.cleaned_data['authors'].append(request.user)
+            form.cleaned_data['authors'].append(
+                Author.objects.get(pk=request.user.pk))
 
-        entry.last_update = datetime.now()
+        entry.last_update = timezone.now()
         entry.save()
 
     def queryset(self, request):
         """Make special filtering by user permissions"""
-        queryset = super(EntryAdmin, self).queryset(request)
-        if request.user.has_perm('zinnia.can_view_all'):
-            return queryset
-        return request.user.entries.all()
+        if not request.user.has_perm('zinnia.can_view_all'):
+            queryset = request.user.entries.all()
+        else:
+            queryset = super(EntryAdmin, self).queryset(request)
+        return queryset.prefetch_related('categories', 'authors', 'sites')
 
     def formfield_for_manytomany(self, db_field, request, **kwargs):
         """Filters the disposable authors"""
         if db_field.name == 'authors':
             if request.user.has_perm('zinnia.can_change_author'):
-                kwargs['queryset'] = User.objects.filter(is_staff=True)
+                kwargs['queryset'] = Author.objects.filter(is_staff=True)
             else:
-                kwargs['queryset'] = User.objects.filter(pk=request.user.pk)
+                kwargs['queryset'] = Author.objects.filter(pk=request.user.pk)
 
         return super(EntryAdmin, self).formfield_for_manytomany(
             db_field, request, **kwargs)
+
+    def get_readonly_fields(self, request, obj=None):
+        readonly_fields = super(EntryAdmin, self).get_readonly_fields(
+            request, obj)
+        if not request.user.has_perm('zinnia.can_change_status'):
+            readonly_fields = list(readonly_fields)
+            readonly_fields.append('status')
+        return readonly_fields
 
     def get_actions(self, request):
         """Define user actions by permissions"""
@@ -194,6 +209,9 @@ class EntryAdmin(admin.ModelAdmin):
         if not request.user.has_perm('zinnia.can_change_author') \
            or not request.user.has_perm('zinnia.can_view_all'):
             del actions['make_mine']
+        if not request.user.has_perm('zinnia.can_change_status'):
+            del actions['make_hidden']
+            del actions['make_published']
         if not settings.PING_DIRECTORIES:
             del actions['ping_directories']
         if not settings.USE_TWITTER:
@@ -260,7 +278,7 @@ class EntryAdmin(admin.ModelAdmin):
 
     def put_on_top(self, request, queryset):
         """Put the selected entries on top at the current date"""
-        queryset.update(creation_date=datetime.now())
+        queryset.update(creation_date=timezone.now())
         self.ping_directories(request, queryset, messages=False)
         self.message_user(request, _(
             'The selected entries are now set at the current date.'))
@@ -293,20 +311,49 @@ class EntryAdmin(admin.ModelAdmin):
     def get_urls(self):
         entry_admin_urls = super(EntryAdmin, self).get_urls()
         urls = patterns(
-            'django.views.generic.simple',
-            url(r'^autocomplete_tags/$', 'direct_to_template',
-                {'template': 'admin/zinnia/entry/autocomplete_tags.js',
-                 'mimetype': 'application/javascript'},
+            '',
+            url(r'^autocomplete_tags/$',
+                self.admin_site.admin_view(self.autocomplete_tags),
                 name='zinnia_entry_autocomplete_tags'),
-            url(r'^wymeditor/$', 'direct_to_template',
-                {'template': 'admin/zinnia/entry/wymeditor.js',
-                 'mimetype': 'application/javascript'},
+            url(r'^wymeditor/$',
+                self.admin_site.admin_view(self.wymeditor),
                 name='zinnia_entry_wymeditor'),
-            url(r'^markitup/$', 'direct_to_template',
-                {'template': 'admin/zinnia/entry/markitup.js',
-                 'mimetype': 'application/javascript'},
-                name='zinnia_entry_markitup'),)
+            url(r'^markitup/$',
+                self.admin_site.admin_view(self.markitup),
+                name='zinnia_entry_markitup'),
+            url(r'^markitup/preview/$',
+                self.admin_site.admin_view(self.content_preview),
+                name='zinnia_entry_markitup_preview'),)
         return urls + entry_admin_urls
+
+    def autocomplete_tags(self, request):
+        """View for tag autocompletion"""
+        return TemplateResponse(
+            request, 'admin/zinnia/entry/autocomplete_tags.js',
+            mimetype='application/javascript')
+
+    def wymeditor(self, request):
+        """View for serving the config of WYMEditor"""
+        return TemplateResponse(
+            request, 'admin/zinnia/entry/wymeditor.js',
+            {'lang': get_language().split('-')[0]},
+            'application/javascript')
+
+    def markitup(self, request):
+        """View for serving the config of MarkItUp"""
+        return TemplateResponse(
+            request, 'admin/zinnia/entry/markitup.js',
+            mimetype='application/javascript')
+
+    @csrf_exempt
+    def content_preview(self, request):
+        """Admin view to preview Entry.content in HTML,
+        useful when using markups to write entries"""
+        data = request.POST.get('data', '')
+        entry = self.model(content=data)
+        return TemplateResponse(
+            request, 'admin/zinnia/entry/preview.html',
+            {'preview': entry.html_content})
 
     def _media(self):
         STATIC_URL = '%szinnia/' % project_settings.STATIC_URL

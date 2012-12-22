@@ -1,15 +1,13 @@
 """Test cases for Zinnia's managers"""
-from datetime import datetime
-
 from django.test import TestCase
-from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
 
 from tagging.models import Tag
 
-from zinnia.models import Entry
-from zinnia.models import Author
-from zinnia.models import Category
+from zinnia.models.entry import Entry
+from zinnia.models.author import Author
+from zinnia.models.category import Category
+from zinnia.tests.utils import datetime
 from zinnia.managers import PUBLISHED
 from zinnia.managers import tags_published
 from zinnia.managers import entries_published
@@ -23,10 +21,10 @@ class ManagersTestCase(TestCase):
             Site.objects.create(domain='http://domain.com',
                                 name='Domain.com')]
         self.authors = [
-            User.objects.create_user(username='webmaster',
-                                     email='webmaster@example.com'),
-            User.objects.create_user(username='contributor',
-                                     email='contributor@example.com')]
+            Author.objects.create_user(username='webmaster',
+                                       email='webmaster@example.com'),
+            Author.objects.create_user(username='contributor',
+                                       email='contributor@example.com')]
         self.categories = [
             Category.objects.create(title='Category 1',
                                     slug='category-1'),
@@ -61,6 +59,15 @@ class ManagersTestCase(TestCase):
         self.entry_2.sites.remove(self.sites[0])
         self.entry_2.sites.add(self.sites[1])
         self.assertEquals(Author.published.count(), 1)
+
+    def test_category_published_manager_get_query_set(self):
+        category = Category.objects.create(
+            title='Third Category', slug='third-category')
+        self.assertEquals(Category.published.count(), 2)
+        self.entry_2.categories.add(category)
+        self.entry_2.status = PUBLISHED
+        self.entry_2.save()
+        self.assertEquals(Category.published.count(), 3)
 
     def test_entries_published(self):
         self.assertEquals(entries_published(Entry.objects.all()).count(), 1)

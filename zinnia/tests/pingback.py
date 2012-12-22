@@ -1,23 +1,29 @@
 """Test cases for Zinnia's PingBack API"""
 import cStringIO
-from datetime import datetime
 from urlparse import urlsplit
 from urllib2 import HTTPError
 from xmlrpclib import ServerProxy
 
 from django.test import TestCase
 from django.contrib import comments
-from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
+from django.test.utils import restore_template_loaders
+from django.test.utils import setup_test_template_loader
 from django.contrib.contenttypes.models import ContentType
 
 from BeautifulSoup import BeautifulSoup
 
-from zinnia.models import Entry
-from zinnia.models import Category
+from zinnia.models.entry import Entry
+from zinnia.models.author import Author
+from zinnia.models.category import Category
+from zinnia.flags import PINGBACK
 from zinnia.managers import PUBLISHED
+from zinnia.tests.utils import datetime
 from zinnia.tests.utils import TestTransport
 from zinnia.xmlrpc.pingback import generate_pingback_content
+from zinnia import url_shortener as shortener_settings
+from zinnia.signals import connect_discussion_signals
+from zinnia.signals import disconnect_discussion_signals
 
 
 class PingBackTestCase(TestCase):
@@ -36,22 +42,32 @@ class PingBackTestCase(TestCase):
         raise HTTPError(url, 404, 'unavailable url', {}, None)
 
     def setUp(self):
+        # Use default URL shortener backend, to avoid networks errors
+        self.original_shortener = shortener_settings.URL_SHORTENER_BACKEND
+        shortener_settings.URL_SHORTENER_BACKEND = 'zinnia.url_shortener.'\
+                                                   'backends.default'
         # Set up a stub around urlopen
         import zinnia.xmlrpc.pingback
         self.original_urlopen = zinnia.xmlrpc.pingback.urlopen
         zinnia.xmlrpc.pingback.urlopen = self.fake_urlopen
+        # Set a short template for entry_detail to avoid rendering errors
+        setup_test_template_loader(
+            {'zinnia/entry_detail.html':
+             '<html><head><title>{{ object.title }}</title></head>' \
+             '<body>{{ object.html_content|safe }}</body></html>',
+             '404.html': '404'})
         # Preparing site
         self.site = Site.objects.get_current()
         self.site.domain = 'localhost:8000'
         self.site.save()
         # Creating tests entries
-        self.author = User.objects.create_user(username='webmaster',
-                                               email='webmaster@example.com')
+        self.author = Author.objects.create_user(username='webmaster',
+                                                 email='webmaster@example.com')
         self.category = Category.objects.create(title='test', slug='test')
         params = {'title': 'My first entry',
                   'content': 'My first content',
                   'slug': 'my-first-entry',
-                  'creation_date': datetime(2010, 1, 1),
+                  'creation_date': datetime(2010, 1, 1, 12),
                   'status': PUBLISHED}
         self.first_entry = Entry.objects.create(**params)
         self.first_entry.sites.add(self.site)
@@ -67,7 +83,7 @@ class PingBackTestCase(TestCase):
                       'http://localhost:8000/error-404/',
                       'http://example.com/'),
                   'slug': 'my-second-entry',
-                  'creation_date': datetime(2010, 1, 1),
+                  'creation_date': datetime(2010, 1, 1, 12),
                   'status': PUBLISHED}
         self.second_entry = Entry.objects.create(**params)
         self.second_entry.sites.add(self.site)
@@ -80,6 +96,8 @@ class PingBackTestCase(TestCase):
     def tearDown(self):
         import zinnia.xmlrpc.pingback
         zinnia.xmlrpc.pingback.urlopen = self.original_urlopen
+        shortener_settings.URL_SHORTENER_BACKEND = self.original_shortener
+        restore_template_loaders()
 
     def test_generate_pingback_content(self):
         soup = BeautifulSoup(self.second_entry.content)
@@ -142,20 +160,42 @@ class PingBackTestCase(TestCase):
         self.assertEquals(response, 33)
 
         # Validate pingback
-        self.assertEquals(self.first_entry.comments.count(), 0)
+        self.assertEquals(self.first_entry.pingback_count, 0)
         self.first_entry.pingback_enabled = True
         self.first_entry.save()
+        connect_discussion_signals()
         response = self.server.pingback.ping(source, target)
+        disconnect_discussion_signals()
         self.assertEquals(
             response,
             'Pingback from %s to %s registered.' % (source, target))
-        self.assertEquals(self.first_entry.pingbacks.count(), 1)
+        first_entry_reloaded = Entry.objects.get(pk=self.first_entry.pk)
+        self.assertEquals(first_entry_reloaded.pingback_count, 1)
         self.assertTrue(self.second_entry.title in \
                         self.first_entry.pingbacks[0].user_name)
 
         # Error code 48 : The pingback has already been registered.
         response = self.server.pingback.ping(source, target)
         self.assertEquals(response, 48)
+
+    def test_pingback_ping_on_entry_without_author(self):
+        target = 'http://%s%s' % (
+            self.site.domain, self.first_entry.get_absolute_url())
+        source = 'http://%s%s' % (
+            self.site.domain, self.second_entry.get_absolute_url())
+        self.first_entry.pingback_enabled = True
+        self.first_entry.save()
+        self.first_entry.authors.clear()
+        connect_discussion_signals()
+        response = self.server.pingback.ping(source, target)
+        disconnect_discussion_signals()
+        self.assertEquals(
+            response,
+            'Pingback from %s to %s registered.' % (source, target))
+        first_entry_reloaded = Entry.objects.get(pk=self.first_entry.pk)
+        self.assertEquals(first_entry_reloaded.pingback_count, 1)
+        self.assertTrue(self.second_entry.title in \
+                        self.first_entry.pingbacks[0].user_name)
 
     def test_pingback_extensions_get_pingbacks(self):
         target = 'http://%s%s' % (
@@ -192,7 +232,7 @@ class PingBackTestCase(TestCase):
             site=self.site, comment='Test pingback',
             user_url='http://example.com/blog/1/',
             user_name='Test pingback')
-        comment.flags.create(user=self.author, flag='pingback')
+        comment.flags.create(user=self.author, flag=PINGBACK)
 
         response = self.server.pingback.extensions.getPingbacks(target)
         self.assertEquals(response, [

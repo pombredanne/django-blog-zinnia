@@ -43,7 +43,11 @@ MAIL_COMMENT_NOTIFICATION_RECIPIENTS = getattr(
     settings, 'ZINNIA_MAIL_COMMENT_NOTIFICATION_RECIPIENTS',
     [manager_tuple[1] for manager_tuple in settings.MANAGERS])
 
-UPLOAD_TO = getattr(settings, 'ZINNIA_UPLOAD_TO', 'uploads')
+COMMENT_MIN_WORDS = getattr(settings, 'ZINNIA_COMMENT_MIN_WORDS', 4)
+
+COMMENT_FLAG_USER_ID = getattr(settings, 'ZINNIA_COMMENT_FLAG_USER_ID', 1)
+
+UPLOAD_TO = getattr(settings, 'ZINNIA_UPLOAD_TO', 'uploads/zinnia')
 
 PROTOCOL = getattr(settings, 'ZINNIA_PROTOCOL', 'http')
 

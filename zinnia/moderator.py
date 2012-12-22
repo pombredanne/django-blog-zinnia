@@ -67,11 +67,10 @@ class EntryCommentModerator(CommentModerator):
     def do_email_authors(self, comment, content_object, request):
         """Send email notification of a new comment to the authors of the
         entry when email notifications have been requested."""
-        exclude_list = self.mail_comment_notification_recipients
+        exclude_list = self.mail_comment_notification_recipients + ['']
         recipient_list = set([author.email
-                              for author in content_object.authors.all()]) ^ \
+                              for author in content_object.authors.all()]) - \
                               set(exclude_list)
-
         if recipient_list:
             site = Site.objects.get_current()
             template = loader.get_template(
@@ -92,10 +91,10 @@ class EntryCommentModerator(CommentModerator):
         exclude_list = self.mail_comment_notification_recipients + \
                        [author.email
                         for author in content_object.authors.all()] + \
-                       [comment.userinfo['email']]
-        recipient_list = set([comment.userinfo['email']
+                       [comment.email]
+        recipient_list = set([comment.email
                               for comment in content_object.comments
-                              if comment.userinfo['email']]) ^ \
+                              if comment.email]) - \
                               set(exclude_list)
 
         if recipient_list:
@@ -122,9 +121,6 @@ class EntryCommentModerator(CommentModerator):
 
         if check_is_spam(comment, content_object, request,
                          self.spam_checker_backends):
-            comment.save()
-            user = comment.content_object.authors.all()[0]
-            comment.flags.create(user=user, flag='spam')
             return True
 
         return False

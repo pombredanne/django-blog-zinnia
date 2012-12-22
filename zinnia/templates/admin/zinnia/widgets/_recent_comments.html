@@ -1,16 +1,16 @@
 {% load i18n zinnia_tags %}
-
+{% load url from future %}
 {% for comment in comments %}
 <tr>
   <th>
     <img src="{% get_gravatar comment.email 40 "G" %}"
-         class="gravatar photo" alt="{{ comment.user_name }}" />
+         class="gravatar photo" alt="{{ comment.name }}" />
   </th>
   <td>
-    {% with comment.content_object as entry %}
-    <strong>{{ comment.user_name }}</strong> {% trans "in" %}
+    {% with entry=comment.content_object %}
+    <strong>{{ comment.name }}</strong> {% trans "in" %}
     <strong>
-      <a href="{{ entry.get_absolute_url }}#comment_{{ comment.pk }}"
+      <a href="{{ entry.get_absolute_url }}#comment-{{ comment.pk }}-by-{{ comment.user_name }}"
          title="{% trans "Comment on" %} {{ entry.title }}">
         {{ entry.title }}
       </a>
@@ -19,7 +19,7 @@
     {{ comment.comment|truncatewords:20|linebreaks }}
   </td>
   <td>
-    <a href="{% url admin:comments_comment_change comment.pk %}"
+    <a href="{% url 'admin:comments_comment_change' comment.pk %}"
        title="{% trans "Edit the comment" %}" class="changelink">
       {% trans "Edit" %}
     </a>
@@ -36,7 +36,7 @@
 {% if comments %}
 <tr>
   <th colspan="3">
-    <a href="{% url admin:comments_comment_changelist %}"
+    <a href="{% url 'admin:comments_comment_changelist' %}"
        title="{% trans "Manage the comments" %}" class="managelink">
       {% trans "Manage the comments" %}
     </a>

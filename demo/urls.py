@@ -1,10 +1,10 @@
 """Urls for the demo of Zinnia"""
-import os
-
+from django.conf import settings
 from django.contrib import admin
-from django.conf.urls.defaults import url
-from django.conf.urls.defaults import include
-from django.conf.urls.defaults import patterns
+from django.conf.urls import url
+from django.conf.urls import include
+from django.conf.urls import patterns
+from django.views.generic.base import RedirectView
 
 from zinnia.sitemaps import TagSitemap
 from zinnia.sitemaps import EntrySitemap
@@ -14,11 +14,11 @@ from zinnia.sitemaps import AuthorSitemap
 admin.autodiscover()
 handler500 = 'demo.views.server_error'
 handler404 = 'django.views.defaults.page_not_found'
+handler403 = 'django.views.defaults.permission_denied'
 
 urlpatterns = patterns(
     '',
-    (r'^$', 'django.views.generic.simple.redirect_to',
-     {'url': '/blog/'}),
+    url(r'^$', RedirectView.as_view(url='/blog/')),
     url(r'^blog/', include('zinnia.urls')),
     url(r'^comments/', include('django.contrib.comments.urls')),
     url(r'^xmlrpc/$', 'django_xmlrpc.views.handle_xmlrpc'),
@@ -34,15 +34,22 @@ sitemaps = {'tags': TagSitemap,
 
 urlpatterns += patterns(
     'django.contrib.sitemaps.views',
-    (r'^sitemap.xml$', 'index',
-     {'sitemaps': sitemaps}),
-    (r'^sitemap-(?P<section>.+)\.xml$', 'sitemap',
-     {'sitemaps': sitemaps}),
+    url(r'^sitemap.xml$', 'index',
+        {'sitemaps': sitemaps}),
+    url(r'^sitemap-(?P<section>.+)\.xml$', 'sitemap',
+        {'sitemaps': sitemaps}),
     )
 
 urlpatterns += patterns(
     '',
+    url(r'^403/$', 'django.views.defaults.permission_denied'),
     url(r'^404/$', 'django.views.defaults.page_not_found'),
     url(r'^500/$', 'demo.views.server_error'),
     )
 
+if settings.DEBUG:
+    urlpatterns += patterns(
+        '',
+        url(r'^media/(?P<path>.*)$', 'django.views.static.serve',
+            {'document_root': settings.MEDIA_ROOT})
+        )

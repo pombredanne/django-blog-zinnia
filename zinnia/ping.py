@@ -11,6 +11,7 @@ from BeautifulSoup import BeautifulSoup
 from django.contrib.sites.models import Site
 from django.core.urlresolvers import reverse
 
+from zinnia.flags import PINGBACK
 from zinnia.settings import PROTOCOL
 
 
@@ -126,7 +127,7 @@ class ExternalUrlsPinger(threading.Thread):
         for link in soup.findAll('link'):
             dict_attr = dict(link.attrs)
             if 'rel' in dict_attr and 'href' in dict_attr:
-                if dict_attr['rel'].lower() == 'pingback':
+                if dict_attr['rel'].lower() == PINGBACK:
                     return dict_attr.get('href')
 
     def find_pingback_urls(self, urls):
@@ -162,6 +163,6 @@ class ExternalUrlsPinger(threading.Thread):
         try:
             server = xmlrpclib.ServerProxy(server_name)
             reply = server.pingback.ping(self.entry_url, target_url)
-        except xmlrpclib.Error:
+        except (xmlrpclib.Error, socket.error):
             reply = '%s cannot be pinged.' % target_url
         return reply

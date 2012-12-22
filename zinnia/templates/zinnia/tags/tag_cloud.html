@@ -1,13 +1,15 @@
 {% load i18n %}
-
-<div>
-  <ul>
-    {% for tag in tags %}
-    <li>
-      <a href="{% url zinnia_tag_detail tag.name %}"
-         title="{% blocktrans count tag.count as entry_count %}{{ entry_count }} entry{% plural %}{{ entry_count }} entries{% endblocktrans %}"
-         class="tag_{{ tag.font_size }}">{{ tag }}</a>
-    </li>
-    {% endfor %}
-  </ul>
-</div>
+{% load url from future %}
+<ul class="{% if tags %}tags{% else %}no-tags{% endif %}">
+  {% for tag in tags %}
+  <li>
+    <a href="{% url 'zinnia_tag_detail' tag.name %}"
+       title="{% blocktrans count entry_count=tag.count %}{{ entry_count }} entry tagged by {{ tag }}{% plural %}{{ entry_count }} entries tagged by {{ tag }}{% endblocktrans %}"
+       class="tag-{{ tag.font_size }}{% if tag.name == context_tag.name %} current{% endif %}">{{ tag }}</a>
+  </li>
+  {% empty %}
+  <li>
+    {% trans "No tags yet." %}
+  </li>
+  {% endfor %}
+</ul>

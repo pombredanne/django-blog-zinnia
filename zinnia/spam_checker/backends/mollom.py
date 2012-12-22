@@ -4,8 +4,8 @@ from django.utils.encoding import smart_str
 from django.core.exceptions import ImproperlyConfigured
 
 try:
-    from pymollom import MollomAPI
-    from pymollom import MollomFault
+    from Mollom import MollomAPI
+    from Mollom import MollomFault
 except ImportError:
     raise ImproperlyConfigured('pymollom module is not available')
 
@@ -28,9 +28,9 @@ def backend(comment, content_object, request):
         raise MollomFault('Your MOLLOM credentials are invalid.')
 
     mollom_data = {'authorIP': request.META.get('REMOTE_ADDR', ''),
-                   'authorName': smart_str(comment.userinfo.get('name', '')),
-                   'authorMail': smart_str(comment.userinfo.get('email', '')),
-                   'authorURL': smart_str(comment.userinfo.get('url', ''))}
+                   'authorName': smart_str(comment.name),
+                   'authorMail': smart_str(comment.email),
+                   'authorURL': smart_str(comment.url)}
 
     cc = mollom_api.checkContent(
         postTitle=smart_str(content_object.title),

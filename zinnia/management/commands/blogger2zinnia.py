@@ -5,9 +5,10 @@ from getpass import getpass
 from datetime import datetime
 from optparse import make_option
 
+from django.conf import settings
+from django.utils import timezone
 from django.utils.encoding import smart_str
 from django.contrib.sites.models import Site
-from django.contrib.auth.models import User
 from django.template.defaultfilters import slugify
 from django.core.management.base import CommandError
 from django.core.management.base import NoArgsCommand
@@ -15,9 +16,12 @@ from django.contrib.contenttypes.models import ContentType
 from django.contrib.comments import get_model as get_comment_model
 
 from zinnia import __version__
-from zinnia.models import Entry
-from zinnia.models import Category
+from zinnia.models.entry import Entry
+from zinnia.models.author import Author
+from zinnia.models.category import Category
 from zinnia.managers import DRAFT, PUBLISHED
+from zinnia.signals import disconnect_entry_signals
+from zinnia.signals import disconnect_discussion_signals
 
 gdata_service = None
 Comment = get_comment_model()
@@ -47,6 +51,8 @@ class Command(NoArgsCommand):
         self.style.TITLE = self.style.SQL_FIELD
         self.style.STEP = self.style.SQL_COLTYPE
         self.style.ITEM = self.style.HTTP_INFO
+        disconnect_entry_signals()
+        disconnect_discussion_signals()
 
     def write_out(self, message, verbosity_level=1):
         """Convenient method for outputing"""
@@ -86,13 +92,14 @@ class Command(NoArgsCommand):
         default_author = options.get('author')
         if default_author:
             try:
-                self.default_author = User.objects.get(username=default_author)
-            except User.DoesNotExist:
+                self.default_author = Author.objects.get(
+                    username=default_author)
+            except Author.DoesNotExist:
                 raise CommandError(
                     'Invalid Zinnia username for default author "%s"' % \
                     default_author)
         else:
-            self.default_author = User.objects.all()[0]
+            self.default_author = Author.objects.all()[0]
 
         if not self.blogger_blog_id:
             self.select_blog_id()
@@ -168,8 +175,10 @@ class Command(NoArgsCommand):
                 except gdata_service.RequestError:
                     # comments not available for this post
                     pass
+                entry.comment_count = entry.comments.count()
+                entry.save(force_update=True)
                 output = self.style.ITEM('> Migrated %s + %s comments\n'
-                    % (entry.title, len(Comment.objects.for_model(entry))))
+                    % (entry.title, entry.comment_count))
 
             self.write_out(output)
 
@@ -211,7 +220,10 @@ class Command(NoArgsCommand):
 def convert_blogger_timestamp(timestamp):
     # parse 2010-12-19T15:37:00.003
     date_string = timestamp[:-6]
-    return datetime.strptime(date_string, '%Y-%m-%dT%H:%M:%S.%f')
+    dt = datetime.strptime(date_string, '%Y-%m-%dT%H:%M:%S.%f')
+    if settings.USE_TZ:
+        dt = timezone.make_aware(dt, timezone.utc)
+    return dt
 
 
 def is_draft(post):

@@ -2,19 +2,19 @@
 from xmlrpclib import Binary
 from xmlrpclib import Fault
 from xmlrpclib import ServerProxy
-from datetime import datetime
 from tempfile import TemporaryFile
 
 from django.test import TestCase
-from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
 from django.core.files.storage import default_storage
 
-from zinnia.models import Entry
-from zinnia.models import Category
+from zinnia.models.entry import Entry
+from zinnia.models.author import Author
+from zinnia.models.category import Category
 from zinnia.managers import DRAFT
 from zinnia.managers import PUBLISHED
 from zinnia.settings import UPLOAD_TO
+from zinnia.tests.utils import datetime
 from zinnia.xmlrpc.metaweblog import authenticate
 from zinnia.xmlrpc.metaweblog import post_structure
 from zinnia.tests.utils import TestTransport
@@ -26,11 +26,11 @@ class MetaWeblogTestCase(TestCase):
 
     def setUp(self):
         # Create data
-        self.webmaster = User.objects.create_superuser(
+        self.webmaster = Author.objects.create_superuser(
             username='webmaster',
             email='webmaster@example.com',
             password='password')
-        self.contributor = User.objects.create_user(
+        self.contributor = Author.objects.create_user(
             username='contributor',
             email='contributor@example.com',
             password='password')
@@ -42,7 +42,7 @@ class MetaWeblogTestCase(TestCase):
                                     slug='category-2')]
         params = {'title': 'My entry 1', 'content': 'My content 1',
                   'tags': 'zinnia, test', 'slug': 'my-entry-1',
-                  'creation_date': datetime(2010, 1, 1),
+                  'creation_date': datetime(2010, 1, 1, 12),
                   'status': PUBLISHED}
         self.entry_1 = Entry.objects.create(**params)
         self.entry_1.authors.add(self.webmaster)
@@ -187,7 +187,7 @@ class MetaWeblogTestCase(TestCase):
         self.assertEquals(post['title'], self.entry_1.title)
         self.assertEquals(post['description'], '<p>My content 1</p>')
         self.assertEquals(post['categories'], ['Category 1', 'Category 2'])
-        self.assertEquals(post['dateCreated'].value, '2010-01-01T00:00:00')
+        self.assertTrue('2010-01-01T12:00:00' in post['dateCreated'].value)
         self.assertEquals(post['link'],
                           'http://example.com/2010/01/01/my-entry-1/')
         self.assertEquals(post['permaLink'],

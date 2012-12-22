@@ -1,32 +1,83 @@
 """Views for Zinnia tags"""
-from django.template import RequestContext
-from django.shortcuts import render_to_response
+from django.http import Http404
+from django.views.generic.list import ListView
+from django.views.generic.list import BaseListView
+from django.template.defaultfilters import slugify
+from django.utils.translation import ugettext as _
 
+from tagging.utils import get_tag
 from tagging.models import Tag
-from tagging.views import tagged_object_list
+from tagging.models import TaggedItem
 
-from zinnia.models import Entry
+from zinnia.models.entry import Entry
 from zinnia.settings import PAGINATION
-
-from zinnia.views.decorators import template_name_for_entry_queryset_filtered
-
-
-def tag_list(request, template_name='zinnia/tag_list.html'):
-    """Return the list of published tags with counts,
-    try to simulate an object_list view"""
-    tag_list = Tag.objects.usage_for_queryset(
-        Entry.published.all(), counts=True)
-    return render_to_response(template_name, {'object_list': tag_list},
-                              context_instance=RequestContext(request))
+from zinnia.views.mixins.templates import EntryQuerysetTemplateResponseMixin
+from zinnia.views.mixins.prefetch_related import PrefetchCategoriesAuthorsMixin
 
 
-def tag_detail(request, tag, page=None, **kwargs):
-    """Display the entries of a tag"""
-    if not kwargs.get('template_name'):
-        kwargs['template_name'] = template_name_for_entry_queryset_filtered(
-            'tag', tag)
+class TagList(ListView):
+    """
+    View return a list of all published tags.
+    """
+    template_name = 'zinnia/tag_list.html'
+    context_object_name = 'tag_list'
 
-    return tagged_object_list(request, tag=tag,
-                              queryset_or_model=Entry.published.all(),
-                              paginate_by=PAGINATION, page=page,
-                              **kwargs)
+    def get_queryset(self):
+        """
+        Return a queryset of published tags,
+        with a count of their entries published.
+        """
+        return Tag.objects.usage_for_queryset(
+            Entry.published.all(), counts=True)
+
+
+class BaseTagDetail(object):
+    """
+    Mixin providing the behavior of the tag detail view,
+    by returning in the context the current tag and a
+    queryset containing the entries published with the tag.
+    """
+
+    def get_queryset(self):
+        """
+        Retrieve the tag by his name and
+        build a queryset of his published entries.
+        """
+        self.tag = get_tag(self.kwargs['tag'])
+        if self.tag is None:
+            raise Http404(_('No Tag found matching "%s".') %
+                          self.kwargs['tag'])
+        return TaggedItem.objects.get_by_model(
+            Entry.published.all(), self.tag)
+
+    def get_context_data(self, **kwargs):
+        """
+        Add the current tag in context.
+        """
+        context = super(BaseTagDetail, self).get_context_data(**kwargs)
+        context['tag'] = self.tag
+        return context
+
+
+class TagDetail(EntryQuerysetTemplateResponseMixin,
+                PrefetchCategoriesAuthorsMixin,
+                BaseTagDetail,
+                BaseListView):
+    """
+    Detailed view for a Tag combinating these mixins:
+
+    - EntryQuerysetTemplateResponseMixin to provide custom templates
+      for the tag display page.
+    - PrefetchCategoriesAuthorsMixin to prefetch related Categories
+      and Authors to belonging the entry list.
+    - BaseTagDetail to provide the behavior of the view.
+    - BaseListView to implement the ListView.
+    """
+    model_type = 'tag'
+    paginate_by = PAGINATION
+
+    def get_model_name(self):
+        """
+        The model name is the tag slugified.
+        """
+        return slugify(self.tag)

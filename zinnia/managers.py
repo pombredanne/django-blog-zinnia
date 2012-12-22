@@ -1,7 +1,6 @@
 """Managers of Zinnia"""
-from datetime import datetime
-
 from django.db import models
+from django.utils import timezone
 from django.contrib.sites.models import Site
 
 DRAFT = 0
@@ -12,34 +11,22 @@ PUBLISHED = 2
 def tags_published():
     """Return the published tags"""
     from tagging.models import Tag
-    from zinnia.models import Entry
+    from zinnia.models.entry import Entry
     tags_entry_published = Tag.objects.usage_for_queryset(
         Entry.published.all())
     # Need to do that until the issue #44 of django-tagging is fixed
     return Tag.objects.filter(name__in=[t.name for t in tags_entry_published])
 
 
-class AuthorPublishedManager(models.Manager):
-    """Manager to retrieve published authors"""
-
-    def get_query_set(self):
-        """Return published authors"""
-        now = datetime.now()
-        return super(AuthorPublishedManager, self).get_query_set().filter(
-            entries__status=PUBLISHED,
-            entries__start_publication__lte=now,
-            entries__end_publication__gt=now,
-            entries__sites=Site.objects.get_current()
-            ).distinct()
-
-
 def entries_published(queryset):
     """Return only the entries published"""
-    now = datetime.now()
-    return queryset.filter(status=PUBLISHED,
-                           start_publication__lte=now,
-                           end_publication__gt=now,
-                           sites=Site.objects.get_current())
+    now = timezone.now()
+    return queryset.filter(
+        models.Q(start_publication__lte=now) | \
+        models.Q(start_publication=None),
+        models.Q(end_publication__gt=now) | \
+        models.Q(end_publication=None),
+        status=PUBLISHED, sites=Site.objects.get_current())
 
 
 class EntryPublishedManager(models.Manager):
@@ -80,3 +67,20 @@ class EntryPublishedManager(models.Manager):
                 lookup |= query_part
 
         return self.get_query_set().filter(lookup)
+
+
+class EntryRelatedPublishedManager(models.Manager):
+    """Manager to retrieve objects associated with published entries"""
+
+    def get_query_set(self):
+        """Return a queryset containing published entries"""
+        now = timezone.now()
+        return super(
+            EntryRelatedPublishedManager, self).get_query_set().filter(
+            models.Q(entries__start_publication__lte=now) | \
+            models.Q(entries__start_publication=None),
+            models.Q(entries__end_publication__gt=now) | \
+            models.Q(entries__end_publication=None),
+            entries__status=PUBLISHED,
+            entries__sites=Site.objects.get_current()
+            ).distinct()

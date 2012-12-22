@@ -5,18 +5,19 @@ from xmlrpclib import Fault
 from xmlrpclib import DateTime
 
 from django.conf import settings
-from django.contrib.auth.models import User
+from django.utils import timezone
 from django.contrib.sites.models import Site
 from django.core.urlresolvers import reverse
 from django.utils.translation import gettext as _
+from django.utils.text import Truncator
 from django.utils.html import strip_tags
-from django.utils.text import truncate_words
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.template.defaultfilters import slugify
 
-from zinnia.models import Entry
-from zinnia.models import Category
+from zinnia.models.entry import Entry
+from zinnia.models.author import Author
+from zinnia.models.category import Category
 from zinnia.settings import PROTOCOL
 from zinnia.settings import UPLOAD_TO
 from zinnia.managers import DRAFT, PUBLISHED
@@ -30,17 +31,17 @@ PERMISSION_DENIED = 803
 def authenticate(username, password, permission=None):
     """Authenticate staff_user with permission"""
     try:
-        user = User.objects.get(username__exact=username)
-    except User.DoesNotExist:
+        author = Author.objects.get(username__exact=username)
+    except Author.DoesNotExist:
         raise Fault(LOGIN_ERROR, _('Username is incorrect.'))
-    if not user.check_password(password):
+    if not author.check_password(password):
         raise Fault(LOGIN_ERROR, _('Password is invalid.'))
-    if not user.is_staff or not user.is_active:
+    if not author.is_staff or not author.is_active:
         raise Fault(PERMISSION_DENIED, _('User account unavailable.'))
     if permission:
-        if not user.has_perm(permission):
+        if not author.has_perm(permission):
             raise Fault(PERMISSION_DENIED, _('User cannot %s.') % permission)
-    return user
+    return author
 
 
 def blog_structure(site):
@@ -139,7 +140,7 @@ def get_authors(apikey, username, password):
     => author structure[]"""
     authenticate(username, password)
     return [author_structure(author)
-            for author in User.objects.filter(is_staff=True)]
+            for author in Author.objects.filter(is_staff=True)]
 
 
 @xmlrpc_func(returns='boolean', args=['string', 'string',
@@ -207,15 +208,17 @@ def new_post(blog_id, username, password, post, publish):
     user = authenticate(username, password, 'zinnia.add_entry')
     if post.get('dateCreated'):
         creation_date = datetime.strptime(
-            post['dateCreated'].value.replace('Z', '').replace('-', ''),
-            '%Y%m%dT%H:%M:%S')
+            post['dateCreated'].value[:18], '%Y-%m-%dT%H:%M:%S')
+        if settings.USE_TZ:
+            creation_date = timezone.make_aware(
+                creation_date, timezone.utc)
     else:
-        creation_date = datetime.now()
+        creation_date = timezone.now()
 
     entry_dict = {'title': post['title'],
                   'content': post['description'],
-                  'excerpt': post.get('mt_excerpt', truncate_words(
-                      strip_tags(post['description']), 50)),
+                  'excerpt': post.get('mt_excerpt', Truncator(
+                      strip_tags(post['description'])).words(50)),
                   'creation_date': creation_date,
                   'last_update': creation_date,
                   'comment_enabled': post.get('mt_allow_comments', 1) == 1,
@@ -224,14 +227,16 @@ def new_post(blog_id, username, password, post, publish):
                   'tags': 'mt_keywords' in post and post['mt_keywords'] or '',
                   'slug': 'wp_slug' in post and post['wp_slug'] or slugify(
                       post['title']),
-                  'password': post.get('wp_password', ''),
-                  'status': publish and PUBLISHED or DRAFT}
+                  'password': post.get('wp_password', '')}
+    if user.has_perm('zinnia.can_change_status'):
+        entry_dict['status'] = publish and PUBLISHED or DRAFT
+
     entry = Entry.objects.create(**entry_dict)
 
     author = user
     if 'wp_author_id' in post and user.has_perm('zinnia.can_change_author'):
         if int(post['wp_author_id']) != user.pk:
-            author = User.objects.get(pk=post['wp_author_id'])
+            author = Author.objects.get(pk=post['wp_author_id'])
     entry.authors.add(author)
 
     entry.sites.add(Site.objects.get_current())
@@ -252,30 +257,33 @@ def edit_post(post_id, username, password, post, publish):
     entry = Entry.objects.get(id=post_id, authors=user)
     if post.get('dateCreated'):
         creation_date = datetime.strptime(
-            post['dateCreated'].value.replace('Z', '').replace('-', ''),
-            '%Y%m%dT%H:%M:%S')
+            post['dateCreated'].value[:18], '%Y-%m-%dT%H:%M:%S')
+        if settings.USE_TZ:
+            creation_date = timezone.make_aware(
+                creation_date, timezone.utc)
     else:
         creation_date = entry.creation_date
 
     entry.title = post['title']
     entry.content = post['description']
-    entry.excerpt = post.get('mt_excerpt', truncate_words(
-        strip_tags(post['description']), 50))
+    entry.excerpt = post.get('mt_excerpt', Truncator(
+        strip_tags(post['description'])).words(50))
     entry.creation_date = creation_date
-    entry.last_update = datetime.now()
+    entry.last_update = timezone.now()
     entry.comment_enabled = post.get('mt_allow_comments', 1) == 1
     entry.pingback_enabled = post.get('mt_allow_pings', 1) == 1
     entry.featured = post.get('sticky', 0) == 1
     entry.tags = 'mt_keywords' in post and post['mt_keywords'] or ''
     entry.slug = 'wp_slug' in post and post['wp_slug'] or slugify(
         post['title'])
-    entry.status = publish and PUBLISHED or DRAFT
+    if user.has_perm('zinnia.can_change_status'):
+        entry.status = publish and PUBLISHED or DRAFT
     entry.password = post.get('wp_password', '')
     entry.save()
 
     if 'wp_author_id' in post and user.has_perm('zinnia.can_change_author'):
         if int(post['wp_author_id']) != user.pk:
-            author = User.objects.get(pk=post['wp_author_id'])
+            author = Author.objects.get(pk=post['wp_author_id'])
             entry.authors.clear()
             entry.authors.add(author)
 
