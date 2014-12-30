@@ -1,32 +1,51 @@
 """Author model for Zinnia"""
 from django.db import models
-from django.contrib.auth.models import User
-from django.contrib.auth.models import UserManager
+from django.contrib.auth import get_user_model
+from django.utils.encoding import python_2_unicode_compatible
 
 from zinnia.managers import entries_published
 from zinnia.managers import EntryRelatedPublishedManager
 
 
-class Author(User):
-    """Proxy model around :class:`django.contrib.auth.models.User`"""
-
-    objects = UserManager()
+class AuthorPublishedManager(models.Model):
+    """
+    Proxy model manager to avoid overriding of
+    the default User's manager and issue #307.
+    """
     published = EntryRelatedPublishedManager()
 
-    def entries_published(self):
-        """Return only the entries published"""
-        return entries_published(self.entries)
+    class Meta:
+        abstract = True
 
-    def __unicode__(self):
-        """If the user has a full name, use that or else the username"""
-        return self.get_full_name() or self.username
+
+@python_2_unicode_compatible
+class Author(get_user_model(),
+             AuthorPublishedManager):
+    """
+    Proxy model around :class:`django.contrib.auth.models.get_user_model`.
+    """
+
+    def entries_published(self):
+        """
+        Returns author's published entries.
+        """
+        return entries_published(self.entries)
 
     @models.permalink
     def get_absolute_url(self):
-        """Return author's URL"""
-        return ('zinnia_author_detail', (self.username,))
+        """
+        Builds and returns the author's URL based on his username.
+        """
+        return ('zinnia:author_detail', [self.get_username()])
+
+    def __str__(self):
+        """
+        If the user has a full name, use it instead of the username.
+        """
+        return self.get_full_name() or self.get_username()
 
     class Meta:
-        """Author's Meta"""
-        app_label = 'zinnia'
+        """
+        Author's meta informations.
+        """
         proxy = True

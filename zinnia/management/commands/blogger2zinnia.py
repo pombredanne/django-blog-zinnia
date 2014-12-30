@@ -7,13 +7,18 @@ from optparse import make_option
 
 from django.conf import settings
 from django.utils import timezone
+from django.utils.text import Truncator
+from django.utils.html import strip_tags
+from django.utils.six.moves import input
 from django.utils.encoding import smart_str
+from django.utils.encoding import smart_unicode
 from django.contrib.sites.models import Site
 from django.template.defaultfilters import slugify
 from django.core.management.base import CommandError
 from django.core.management.base import NoArgsCommand
 from django.contrib.contenttypes.models import ContentType
-from django.contrib.comments import get_model as get_comment_model
+
+from django_comments import get_model as get_comment_model
 
 from zinnia import __version__
 from zinnia.models.entry import Entry
@@ -28,8 +33,10 @@ Comment = get_comment_model()
 
 
 class Command(NoArgsCommand):
-    """Command object for importing a Blogger blog
-    into Zinnia via Google's gdata API."""
+    """
+    Command object for importing a Blogger blog
+    into Zinnia via Google's gdata API.
+    """
     help = 'Import a Blogger blog into Zinnia.'
 
     option_list = NoArgsCommand.option_list + (
@@ -39,14 +46,20 @@ class Command(NoArgsCommand):
                     help='The Zinnia category to import Blogger posts to'),
         make_option('--blogger-blog-id', dest='blogger_blog_id', default='',
                     help='The id of the Blogger blog to import'),
+        make_option('--blogger-limit', dest='blogger_limit', default=25,
+                    help='Specify a limit for posts to be imported'),
         make_option('--author', dest='author', default='',
-                    help='All imported entries belong to specified author')
-        )
+                    help='All imported entries belong to specified author'),
+        make_option('--noautoexcerpt', action='store_false',
+                    dest='auto_excerpt', default=True,
+                    help='Do NOT generate an excerpt.'))
 
     SITE = Site.objects.get_current()
 
     def __init__(self):
-        """Init the Command and add custom styles"""
+        """
+        Init the Command and add custom styles.
+        """
         super(Command, self).__init__()
         self.style.TITLE = self.style.SQL_FIELD
         self.style.STEP = self.style.SQL_COLTYPE
@@ -55,7 +68,9 @@ class Command(NoArgsCommand):
         disconnect_discussion_signals()
 
     def write_out(self, message, verbosity_level=1):
-        """Convenient method for outputing"""
+        """
+        Convenient method for outputing.
+        """
         if self.verbosity and self.verbosity >= verbosity_level:
             sys.stdout.write(smart_str(message))
             sys.stdout.flush()
@@ -66,19 +81,21 @@ class Command(NoArgsCommand):
             from gdata import service
             gdata_service = service
         except ImportError:
-            raise CommandError('You need to install the gdata ' \
+            raise CommandError('You need to install the gdata '
                                'module to run this command.')
 
         self.verbosity = int(options.get('verbosity', 1))
         self.blogger_username = options.get('blogger_username')
-        self.category_title = options.get('category_title')
         self.blogger_blog_id = options.get('blogger_blog_id')
+        self.blogger_limit = int(options.get('blogger_limit'))
+        self.category_title = options.get('category_title')
+        self.auto_excerpt = options.get('auto-excerpt', True)
 
         self.write_out(self.style.TITLE(
             'Starting migration from Blogger to Zinnia %s\n' % __version__))
 
         if not self.blogger_username:
-            self.blogger_username = raw_input('Blogger username: ')
+            self.blogger_username = input('Blogger username: ')
             if not self.blogger_username:
                 raise CommandError('Invalid Blogger username')
 
@@ -93,10 +110,10 @@ class Command(NoArgsCommand):
         if default_author:
             try:
                 self.default_author = Author.objects.get(
-                    username=default_author)
+                    **{Author.USERNAME_FIELD: self.default_author})
             except Author.DoesNotExist:
                 raise CommandError(
-                    'Invalid Zinnia username for default author "%s"' % \
+                    'Invalid Zinnia username for default author "%s"' %
                     default_author)
         else:
             self.default_author = Author.objects.all()[0]
@@ -105,7 +122,7 @@ class Command(NoArgsCommand):
             self.select_blog_id()
 
         if not self.category_title:
-            self.category_title = raw_input(
+            self.category_title = input(
                 'Category title for imported entries: ')
             if not self.category_title:
                 raise CommandError('Invalid category title')
@@ -124,7 +141,7 @@ class Command(NoArgsCommand):
                 self.write_out('%s. %s (%s)' % (i, blog.title.text,
                                                 get_blog_id(blog)))
             try:
-                blog_index = int(raw_input('\nSelect a blog to import: '))
+                blog_index = int(input('\nSelect a blog to import: '))
                 blog = blogs[blog_index]
                 break
             except (ValueError, KeyError):
@@ -146,22 +163,24 @@ class Command(NoArgsCommand):
     def import_posts(self):
         category = self.get_category()
         self.write_out(self.style.STEP('- Importing entries\n'))
-        for post in self.blogger_manager.get_posts(self.blogger_blog_id):
+        for post in self.blogger_manager.get_posts(self.blogger_blog_id,
+                                                   self.blogger_limit):
             creation_date = convert_blogger_timestamp(post.published.text)
             status = DRAFT if is_draft(post) else PUBLISHED
             title = post.title.text or ''
             content = post.content.text or ''
+            excerpt = self.auto_excerpt and Truncator(
+                strip_tags(smart_unicode(content))).words(50) or ''
             slug = slugify(post.title.text or get_post_id(post))[:255]
             try:
                 entry = Entry.objects.get(creation_date=creation_date,
                                           slug=slug)
                 output = self.style.NOTICE('> Skipped %s (already migrated)\n'
-                    % entry)
+                                           % entry)
             except Entry.DoesNotExist:
                 entry = Entry(status=status, title=title, content=content,
-                              creation_date=creation_date, slug=slug)
-                if self.default_author:
-                    entry.author = self.default_author
+                              creation_date=creation_date, slug=slug,
+                              excerpt=excerpt)
                 entry.tags = ','.join([slugify(cat.term) for
                                        cat in post.category])
                 entry.last_update = convert_blogger_timestamp(
@@ -178,7 +197,7 @@ class Command(NoArgsCommand):
                 entry.comment_count = entry.comments.count()
                 entry.save(force_update=True)
                 output = self.style.ITEM('> Migrated %s + %s comments\n'
-                    % (entry.title, entry.comment_count))
+                                         % (entry.title, entry.comment_count))
 
             self.write_out(output)
 
@@ -255,13 +274,14 @@ class BloggerManager(object):
         for blog in feed.entry:
             yield blog
 
-    def get_posts(self, blog_id):
-        feed = self.service.Get('/feeds/%s/posts/default' % blog_id)
+    def get_posts(self, blog_id, limit):
+        feed = self.service.Get('/feeds/%s/posts/default/?max-results=%d' %
+                                (blog_id, limit))
         for post in feed.entry:
             yield post
 
     def get_comments(self, blog_id, post_id):
-        feed = self.service.Get('/feeds/%s/%s/comments/default' % \
+        feed = self.service.Get('/feeds/%s/%s/comments/default' %
                                 (blog_id, post_id))
         for comment in feed.entry:
             yield comment
