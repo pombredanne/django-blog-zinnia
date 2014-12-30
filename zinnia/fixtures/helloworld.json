@@ -35,7 +35,8 @@
       "login_required": false,
       "password": "",
       "end_publication": null,
-      "template": "entry_detail.html",
+      "detail_template": "entry_detail.html",
+      "content_template": "zinnia/_entry_detail.html",
       "comment_enabled": true,
       "tags": "welcome, blog, test",
       "image": "",
@@ -52,6 +53,7 @@
       "featured": false,
       "start_publication": null,
       "pingback_enabled": true,
+      "trackback_enabled": true,
       "authors": [
         1
       ],
@@ -70,7 +72,8 @@
       "login_required": false,
       "password": "",
       "end_publication": null,
-      "template": "entry_detail.html",
+      "detail_template": "entry_detail.html",
+      "content_template": "zinnia/_entry_detail.html",
       "comment_enabled": true,
       "tags": "blog, test",
       "image": "",
@@ -88,6 +91,7 @@
       "featured": false,
       "start_publication": null,
       "pingback_enabled": true,
+      "trackback_enabled": true,
       "authors": [
         1
       ],
@@ -107,7 +111,8 @@
       "login_required": false,
       "password": "",
       "end_publication": null,
-      "template": "entry_detail.html",
+      "detail_template": "entry_detail.html",
+      "content_template": "zinnia/_entry_detail.html",
       "comment_enabled": true,
       "tags": "html, test, ",
       "image": "",
@@ -124,6 +129,7 @@
       "featured": false,
       "start_publication": null,
       "pingback_enabled": true,
+      "trackback_enabled": true,
       "authors": [
         1
       ],
@@ -133,6 +139,14 @@
         2,
         1
       ]
+    }
+  },
+  {
+    "pk": 1,
+    "model": "sites.site",
+    "fields": {
+      "domain": "localhost:8000",
+      "name": "Localhost"
     }
   }
 ]

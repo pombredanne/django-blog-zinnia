@@ -1,9 +1,12 @@
 """Feed to Zinnia command module"""
 import os
 import sys
-from urllib2 import urlopen
 from datetime import datetime
 from optparse import make_option
+try:
+    from urllib.request import urlopen
+except ImportError:  # Python 2
+    from urllib2 import urlopen
 
 from django.conf import settings
 from django.utils import timezone
@@ -28,8 +31,10 @@ from zinnia.signals import disconnect_discussion_signals
 
 
 class Command(LabelCommand):
-    """Command object for importing a RSS or Atom
-    feed into Zinnia."""
+    """
+    Command object for importing a RSS or Atom
+    feed into Zinnia.
+    """
     help = 'Import a RSS or Atom feed into Zinnia.'
     label = 'feed url'
     args = 'url'
@@ -45,12 +50,13 @@ class Command(LabelCommand):
                     dest='tags', default=True,
                     help='Do NOT store categories as tags'),
         make_option('--author', dest='author', default='',
-                    help='All imported entries belong to specified author'),
-        )
+                    help='All imported entries belong to specified author'))
     SITE = Site.objects.get_current()
 
     def __init__(self):
-        """Init the Command and add custom styles"""
+        """
+        Init the Command and add custom styles.
+        """
         super(Command, self).__init__()
         self.style.TITLE = self.style.SQL_FIELD
         self.style.STEP = self.style.SQL_COLTYPE
@@ -59,7 +65,9 @@ class Command(LabelCommand):
         disconnect_discussion_signals()
 
     def write_out(self, message, verbosity_level=1):
-        """Convenient method for outputing"""
+        """
+        Convenient method for outputing.
+        """
         if self.verbosity and self.verbosity >= verbosity_level:
             sys.stdout.write(smart_str(message))
             sys.stdout.flush()
@@ -68,7 +76,7 @@ class Command(LabelCommand):
         try:
             import feedparser
         except ImportError:
-            raise CommandError('You need to install the feedparser ' \
+            raise CommandError('You need to install the feedparser '
                                'module to run this command.')
 
         self.tags = options.get('tags', True)
@@ -79,7 +87,7 @@ class Command(LabelCommand):
         if self.default_author:
             try:
                 self.default_author = Author.objects.get(
-                    username=self.default_author)
+                    **{Author.USERNAME_FIELD: self.default_author})
             except Author.DoesNotExist:
                 raise CommandError('Invalid username for default author')
 
@@ -90,10 +98,12 @@ class Command(LabelCommand):
         self.import_entries(feed.entries)
 
     def import_entries(self, feed_entries):
-        """Import entries"""
+        """
+        Import entries.
+        """
         for feed_entry in feed_entries:
             self.write_out('> %s... ' % feed_entry.title)
-            if feed_entry.get('publised_parsed'):
+            if feed_entry.get('published_parsed'):
                 creation_date = datetime(*feed_entry.published_parsed[:6])
                 if settings.USE_TZ:
                     creation_date = timezone.make_aware(
@@ -113,7 +123,7 @@ class Command(LabelCommand):
             categories = self.import_categories(feed_entry)
             entry_dict = {'title': feed_entry.title[:255],
                           'content': feed_entry.description,
-                          'excerpt': feed_entry.get('summary'),
+                          'excerpt': strip_tags(feed_entry.get('summary')),
                           'status': PUBLISHED,
                           'creation_date': creation_date,
                           'start_publication': creation_date,
@@ -134,8 +144,8 @@ class Command(LabelCommand):
 
             if self.image_enclosure:
                 for enclosure in feed_entry.enclosures:
-                    if 'image' in enclosure.get('type') \
-                           and enclosure.get('href'):
+                    if ('image' in enclosure.get('type') and
+                            enclosure.get('href')):
                         img_tmp = NamedTemporaryFile(delete=True)
                         img_tmp.write(urlopen(enclosure['href']).read())
                         img_tmp.flush()
@@ -151,8 +161,9 @@ class Command(LabelCommand):
                         slugify(feed_entry.author_detail.get('name')),
                         feed_entry.author_detail.get('email', ''))
                 except IntegrityError:
-                    author = Author.objects.get(
-                        username=slugify(feed_entry.author_detail.get('name')))
+                    author = Author.objects.get(**{
+                        Author.USERNAME_FIELD:
+                        slugify(feed_entry.author_detail.get('name'))})
                 entry.authors.add(author)
 
             self.write_out(self.style.ITEM('OK\n'))

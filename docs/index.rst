@@ -75,7 +75,8 @@ Notes
 Related
 -------
 
-* `Testing and coverage reports`_
+* `Build status`_
+* `Coverage report`_
 
 
 Indices and tables
@@ -87,6 +88,7 @@ index or try to find it using the search function:
 * :ref:`genindex`
 * :ref:`search`
 
-.. _`documentation online at readthedocs.org`: http://django-blog-zinnia.readthedocs.org/
-.. _`Testing and coverage reports`: https://jenkins.shiningpanda.com/django-blog-zinnia/job/Django-Blog-Zinnia/
+.. _`documentation online at readthedocs.org`: http://docs.django-blog-zinnia.com/
+.. _`Build status`: https://travis-ci.org/Fantomas42/django-blog-zinnia
+.. _`Coverage report`: https://coveralls.io/r/Fantomas42/django-blog-zinnia
 

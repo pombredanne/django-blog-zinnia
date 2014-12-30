@@ -7,8 +7,8 @@ readability and to be always present when the version 3.4.2 of Django will
 be here. :)
 
 Predicting the future is a good thing, because it's coming soon.
-Actually Zinnia is designed to handle the 1.4.x version and will reach the
-release 1.6 easily without major changes.
+Actually Zinnia is designed to handle the 1.7.x version and will reach the
+release 1.9 easily without major changes.
 
 https://docs.djangoproject.com/en/dev/internals/deprecation/
 
@@ -22,6 +22,30 @@ Compatibility with Django
 =========================
 
 Here a list establishing the compatibility between Zinnia and Django:
+
+.. versionchanged:: 0.15
+
+Backward incompatibilities with Django v1.6.x due to :
+
+* Usage of the new migrations.
+* Usage of the new lru_cache function.
+* Usage of Admin.get_changeform_initial_data method.
+
+.. versionchanged:: 0.14
+
+Backward incompatibilities with Django v1.5.x due to :
+
+* Usage of Queryset.datetimes().
+* Handle savepoints in tests.
+
+.. versionchanged:: 0.13
+
+Backward incompatibilities with Django v1.4.x due to :
+
+* Experimental support of Python 3.
+* Remove of the Python 2.5 support.
+* Changes related to the archives views.
+* Usage of the new syntax for the url templatetag.
 
 .. versionchanged:: 0.11
 
